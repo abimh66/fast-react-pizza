@@ -1,16 +1,16 @@
 import { useState } from 'react';
-import { Form } from 'react-router-dom';
-import { createOrder } from '../../services/apiRestaurant.js';
-import { redirect } from 'react-router-dom';
-import { useNavigation } from 'react-router-dom';
-import { useActionData } from 'react-router-dom';
-import Button from '../../ui/Button.jsx';
-import { useSelector } from 'react-redux';
+import { Form, redirect, useNavigation, useActionData } from 'react-router-dom';
+
+import { useSelector, useDispatch } from 'react-redux';
 import { clearCart, getCart, getTotalCartPrice } from '../cart/cartSlice.js';
-import { getUserName } from '../user/userSlice.js';
-import EmptyCart from '../cart/EmptyCart.jsx';
+import { fetchAddress, getUser } from '../user/userSlice.js';
 import store from '../../store.js';
+
+import { createOrder } from '../../services/apiRestaurant.js';
 import { formatCurrency } from '../../utils/helpers.js';
+
+import Button from '../../ui/Button.jsx';
+import EmptyCart from '../cart/EmptyCart.jsx';
 
 // https://uibakery.io/regex-library/phone-number
 const isValidPhone = (str) =>
@@ -24,11 +24,19 @@ function CreateOrder() {
   const navigation = useNavigation();
   const isSubmitting = navigation.state === 'submitting';
 
-  const errors = useActionData();
+  const formErrors = useActionData();
+  const dispatch = useDispatch();
 
-  const userName = useSelector(getUserName);
   const cart = useSelector(getCart);
   const totalCartPrice = useSelector(getTotalCartPrice);
+  const {
+    userName,
+    status: addressStatus,
+    position,
+    address,
+    error: errorAddress,
+  } = useSelector(getUser);
+  const isLoadingAddress = addressStatus === 'loading';
 
   const priorityPrice = withPriority ? totalCartPrice * 0.2 : 0;
   const totalPrice = priorityPrice + totalCartPrice;
@@ -57,24 +65,45 @@ function CreateOrder() {
           <label className="sm:basis-40">Phone number</label>
           <div className="grow">
             <input type="tel" name="phone" className="input w-full" required />
-            {errors?.phone && (
+            {formErrors?.phone && (
               <p className="mt-2 rounded-md bg-red-100 p-2 text-xs text-red-700">
-                {errors.phone}
+                {formErrors.phone}
               </p>
             )}
           </div>
         </div>
 
-        <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <div className="relative mb-5 flex flex-col gap-2 sm:flex-row sm:items-center">
           <label className="sm:basis-40">Address</label>
           <div className="grow">
             <input
               className="input w-full"
               type="text"
               name="address"
+              disabled={isLoadingAddress}
+              defaultValue={address}
               required
             />
+            {addressStatus === 'error' && (
+              <p className="mt-2 rounded-md bg-red-100 p-2 text-xs text-red-700">
+                {errorAddress}
+              </p>
+            )}
           </div>
+          {!position.latitude && !position.longitude && (
+            <span className="absolute right-[3px] top-[3px] z-50">
+              <Button
+                type="small"
+                disabled={isLoadingAddress}
+                onClick={(e) => {
+                  e.preventDefault();
+                  dispatch(fetchAddress());
+                }}
+              >
+                Get Position
+              </Button>
+            </span>
+          )}
         </div>
 
         <div className="mb-12 flex items-center gap-5">
@@ -93,7 +122,16 @@ function CreateOrder() {
 
         <div>
           <input type="hidden" name="cart" value={JSON.stringify(cart)} />
-          <Button type="primary" disabled={isSubmitting}>
+          <input
+            type="hidden"
+            name="position"
+            value={
+              position.latitude && position.longitude
+                ? `${position.latitude}, ${position.longitude}`
+                : ''
+            }
+          />
+          <Button type="primary" disabled={isSubmitting && isLoadingAddress}>
             {isSubmitting
               ? 'Placing order...'
               : `Order now from ${formatCurrency(totalPrice)}`}
@@ -115,6 +153,7 @@ export async function action({ request }) {
     cart: JSON.parse(data.cart),
     priority: data.priority === 'true',
   };
+  console.log(order);
 
   // Handle invalid phone number
   const errors = {};
